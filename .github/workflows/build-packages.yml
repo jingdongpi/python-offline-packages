@@ -13,7 +13,718 @@ on:
         required: false
         default: 'numpy scipy pandas matplotlib'
       custom_requirements:
+        description: '是否使用自定义requirements.txt'# .github/workflows/build-packages.yml
+name: Build Python Packages for Multiple Environments
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      packages:
+        description: '要下载的包列表 (用空格分隔)'
+        required: false
+        default: 'numpy scipy pandas matplotlib'
+      custom_requirements:
         description: '是否使用自定义requirements.txt'
+        type: boolean
+        default: false
+
+jobs:
+  build-packages:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # 允许部分失败
+      matrix:
+        include:
+          # Windows x86-64 (使用2019提高兼容性)
+          - os: windows-2019
+            python-version: '3.8'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.9'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.10'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.11'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.12'
+            platform: windows
+            arch: x86_64
+          
+          # Linux x86-64
+          - os: ubuntu-22.04
+            python-version: '3.8'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.9'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.10'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.11'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.12'
+            platform: linux
+            arch: x86_64
+          
+          # Linux ARM64 (原生ARM64环境)
+          - os: ubuntu-22.04-arm
+            python-version: '3.8'
+            platform: linux
+            arch: aarch64
+          - os: ubuntu-22.04-arm
+            python-version: '3.9'
+            platform: linux
+            arch: aarch64
+          - os: ubuntu-22.04-arm
+            python-version: '3.10'
+            platform: linux
+            arch: aarch64
+          - os: ubuntu-22.04-arm
+            python-version: '3.11'
+            platform: linux
+            arch: aarch64
+          - os: ubuntu-22.04-arm
+            python-version: '3.12'
+            platform: linux
+            arch: aarch64
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        architecture: ${{ matrix.arch == 'aarch64' && 'x64' || 'x64' }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-${{ matrix.arch }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.arch }}-pip-
+    
+    - name: Verify native architecture
+      shell: bash
+      run: |
+        echo "Runner OS: ${{ runner.os }}"
+        echo "Matrix OS: ${{ matrix.os }}"
+        echo "Current architecture: $(uname -m)"
+        echo "Python platform: $(python -c 'import platform; print(platform.machine())')"
+        echo "Expected architecture: ${{ matrix.arch }}"
+        echo "Python version: $(python --version)"
+    
+    - name: Get platform info
+      id: platform
+      shell: bash
+      run: |
+        case "${{ matrix.arch }}" in
+          "x86_64")
+            if [[ "${{ matrix.platform }}" == "windows" ]]; then
+              echo "platform=win_amd64" >> $GITHUB_OUTPUT
+            else
+              echo "platform=linux_x86_64" >> $GITHUB_OUTPUT
+            fi
+            ;;
+          "aarch64")
+            echo "platform=linux_aarch64" >> $GITHUB_OUTPUT
+            ;;
+        esac
+        
+        # 设置输出目录名
+        py_version=$(echo "${{ matrix.python-version }}" | tr -d '.')
+        echo "output_dir=packages-${{ matrix.platform }}-${{ matrix.arch }}-py${py_version}" >> $GITHUB_OUTPUT
+        
+        echo "Platform tag: $platform"
+        echo "Output directory: packages-${{ matrix.platform }}-${{ matrix.arch }}-py${py_version}"
+    
+    - name: Upgrade pip and install tools
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip wheel setuptools
+        pip install pip-tools || echo "pip-tools安装失败，将跳过版本锁定"
+    
+    - name: Prepare package list
+      id: packages
+      shell: bash
+      run: |
+        if [[ "${{ github.event.inputs.custom_requirements }}" == "true" && -f "requirements.txt" ]]; then
+          echo "使用项目中的requirements.txt"
+          cp requirements.txt temp_requirements.txt
+        else
+          # 使用输入的包列表或默认包
+          PACKAGES="${{ github.event.inputs.packages }}"
+          if [[ -z "$PACKAGES" ]]; then
+            PACKAGES="numpy scipy pandas matplotlib seaborn scikit-learn requests urllib3 setuptools wheel pip"
+          fi
+          echo "使用包列表: $PACKAGES"
+          echo "$PACKAGES" | tr ' ' '\n' > temp_requirements.txt
+        fi
+        
+        echo "基础包列表:"
+        cat temp_requirements.txt
+        
+        # 生成详细的requirements.txt（包含版本锁定）
+        if command -v pip-compile >/dev/null 2>&1; then
+          echo "正在生成锁定版本的requirements..."
+          if pip-compile temp_requirements.txt --output-file=requirements_locked.txt --no-emit-index-url; then
+            echo "pip-compile成功"
+          else
+            echo "pip-compile失败，使用基础包列表"
+            cp temp_requirements.txt requirements_locked.txt
+          fi
+        else
+          echo "pip-tools不可用，使用基础包列表"
+          cp temp_requirements.txt requirements_locked.txt
+        fi
+        
+        echo "最终的requirements文件内容:"
+        cat requirements_locked.txt
+    
+    - name: Download packages
+      shell: bash
+      run: |
+        mkdir -p ${{ steps.platform.outputs.output_dir }}
+        mkdir -p ${{ steps.platform.outputs.output_dir }}/with_deps
+        
+        echo "开始下载 ${{ matrix.platform }}-${{ matrix.arch }} 平台的包..."
+        echo "Platform tag: ${{ steps.platform.outputs.platform }}"
+        echo "Python version: ${{ matrix.python-version }}"
+        
+        # 首先下载包含所有依赖的版本（通用）
+        echo "=== 下载包含依赖的通用版本 ==="
+        pip download \
+          -r requirements_locked.txt \
+          --dest ${{ steps.platform.outputs.output_dir }}/with_deps \
+          --prefer-binary \
+          --python-version ${{ matrix.python-version }} || {
+            echo "通用版本下载失败，但继续进行..."
+          }
+        
+        # 然后下载特定平台的wheel包
+        echo "=== 下载特定平台的wheel包 ==="
+        pip download \
+          -r requirements_locked.txt \
+          --dest ${{ steps.platform.outputs.output_dir }} \
+          --platform ${{ steps.platform.outputs.platform }} \
+          --python-version ${{ matrix.python-version }} \
+          --only-binary=:all: \
+          --no-deps || {
+            echo "特定平台下载失败，尝试更宽松的策略..."
+            pip download \
+              -r requirements_locked.txt \
+              --dest ${{ steps.platform.outputs.output_dir }} \
+              --prefer-binary \
+              --python-version ${{ matrix.python-version }} \
+              --no-deps || {
+                echo "宽松策略也失败，尝试最基本的下载..."
+                pip download \
+                  -r requirements_locked.txt \
+                  --dest ${{ steps.platform.outputs.output_dir }} \
+                  --no-deps
+              }
+          }
+    
+    - name: Create installation script
+      shell: bash
+      run: |
+        # Linux/Mac安装脚本
+        cat > ${{ steps.platform.outputs.output_dir }}/install.sh << 'EOF'
+        #!/bin/bash
+        # 离线安装脚本 - Linux/Mac
+        
+        set -e  # 遇到错误时退出
+        
+        echo "======================================"
+        echo "Python包离线安装脚本"
+        echo "======================================"
+        echo "平台: ${{ steps.platform.outputs.platform }}"
+        echo "Python版本: ${{ matrix.python-version }}"
+        echo "架构: ${{ matrix.arch }}"
+        echo "构建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || echo "未知")"
+        echo "======================================"
+        
+        # 检查Python是否可用
+        if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+          echo "❌ 错误: 未找到Python解释器"
+          exit 1
+        fi
+        
+        # 使用python3或python
+        PYTHON_CMD="python3"
+        if ! command -v python3 >/dev/null 2>&1; then
+          PYTHON_CMD="python"
+        fi
+        
+        echo "使用Python解释器: $PYTHON_CMD"
+        
+        # 检查Python版本
+        PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oP '(?<=Python )\d+\.\d+' || echo "unknown")
+        echo "当前Python版本: $PYTHON_VERSION"
+        echo "包构建版本: ${{ matrix.python-version }}"
+        
+        if [[ "$PYTHON_VERSION" != "${{ matrix.python-version }}" ]]; then
+          echo "⚠️  警告: Python版本不匹配！"
+          echo "   当前版本: $PYTHON_VERSION"
+          echo "   包版本:   ${{ matrix.python-version }}"
+          echo ""
+          read -p "是否继续安装? (y/N): " confirm
+          if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
+            echo "安装已取消"
+            exit 1
+          fi
+        fi
+        
+        # 检查requirements文件
+        if [[ ! -f "requirements_locked.txt" ]]; then
+          echo "❌ 错误: 未找到requirements_locked.txt文件"
+          echo "请确保在包含安装文件的目录中运行此脚本"
+          exit 1
+        fi
+        
+        echo ""
+        echo "开始安装包..."
+        echo "======================================"
+        
+        # 安装包
+        $PYTHON_CMD -m pip install --no-index --find-links . -r requirements_locked.txt
+        
+        if [[ $? -eq 0 ]]; then
+          echo "======================================"
+          echo "✅ 安装完成！"
+          echo ""
+          echo "验证安装:"
+          $PYTHON_CMD -c "
+        try:
+            import numpy, scipy, pandas, matplotlib
+            print('✅ 主要包导入成功')
+        except ImportError as e:
+            print('⚠️  部分包导入失败:', e)
+        "
+        else
+          echo "❌ 安装失败！"
+          echo "如果遇到问题，请尝试："
+          echo "1. 使用with_deps目录中的包"
+          echo "2. 检查Python版本兼容性"
+          echo "3. 安装系统级依赖"
+          exit 1
+        fi
+        EOF
+        
+        # Windows批处理脚本
+        cat > ${{ steps.platform.outputs.output_dir }}/install.bat << 'EOF'
+        @echo off
+        chcp 65001 >nul
+        echo ======================================
+        echo Python包离线安装脚本 - Windows
+        echo ======================================
+        echo 平台: ${{ steps.platform.outputs.platform }}
+        echo Python版本: ${{ matrix.python-version }}
+        echo 架构: ${{ matrix.arch }}
+        echo ======================================
+        
+        REM 检查Python是否可用
+        python --version >nul 2>&1
+        if %ERRORLEVEL% NEQ 0 (
+            echo ❌ 错误: 未找到Python解释器
+            echo 请确保Python已安装并添加到PATH环境变量
+            pause
+            exit /b 1
+        )
+        
+        echo 当前Python版本:
+        python --version
+        
+        REM 检查requirements文件
+        if not exist "requirements_locked.txt" (
+            echo ❌ 错误: 未找到requirements_locked.txt文件
+            echo 请确保在包含安装文件的目录中运行此脚本
+            pause
+            exit /b 1
+        )
+        
+        echo.
+        echo 开始安装包...
+        echo ======================================
+        
+        REM 安装包
+        python -m pip install --no-index --find-links . -r requirements_locked.txt
+        
+        if %ERRORLEVEL% EQU 0 (
+            echo ======================================
+            echo ✅ 安装完成！
+            echo.
+            echo 验证安装:
+            python -c "try: import numpy, scipy, pandas, matplotlib; print('✅ 主要包导入成功'); except ImportError as e: print('⚠️ 部分包导入失败:', e)"
+        ) else (
+            echo ❌ 安装失败！
+            echo 如果遇到问题，请尝试：
+            echo 1. 使用with_deps目录中的包
+            echo 2. 检查Python版本兼容性
+            echo 3. 以管理员身份运行
+        )
+        
+        echo.
+        pause
+        EOF
+        
+        # PowerShell脚本
+        cat > ${{ steps.platform.outputs.output_dir }}/install.ps1 << 'EOF'
+        # PowerShell安装脚本
+        
+        Write-Host "======================================" -ForegroundColor Green
+        Write-Host "Python包离线安装脚本 - PowerShell" -ForegroundColor Green
+        Write-Host "======================================" -ForegroundColor Green
+        Write-Host "平台: ${{ steps.platform.outputs.platform }}"
+        Write-Host "Python版本: ${{ matrix.python-version }}"
+        Write-Host "架构: ${{ matrix.arch }}"
+        Write-Host "======================================" -ForegroundColor Green
+        
+        # 检查Python
+        try {
+            $pythonVersion = python --version 2>&1
+            Write-Host "当前Python版本: $pythonVersion"
+        } catch {
+            Write-Host "❌ 错误: 未找到Python解释器" -ForegroundColor Red
+            Read-Host "按任意键退出"
+            exit 1
+        }
+        
+        # 检查requirements文件
+        if (-not (Test-Path "requirements_locked.txt")) {
+            Write-Host "❌ 错误: 未找到requirements_locked.txt文件" -ForegroundColor Red
+            Read-Host "按任意键退出"
+            exit 1
+        }
+        
+        Write-Host ""
+        Write-Host "开始安装包..." -ForegroundColor Yellow
+        Write-Host "======================================" -ForegroundColor Green
+        
+        # 安装包
+        python -m pip install --no-index --find-links . -r requirements_locked.txt
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "======================================" -ForegroundColor Green
+            Write-Host "✅ 安装完成！" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "验证安装:" -ForegroundColor Yellow
+            python -c "try: import numpy, scipy, pandas, matplotlib; print('✅ 主要包导入成功'); except ImportError as e: print('⚠️ 部分包导入失败:', e)"
+        } else {
+            Write-Host "❌ 安装失败！" -ForegroundColor Red
+            Write-Host "如果遇到问题，请尝试：" -ForegroundColor Yellow
+            Write-Host "1. 使用with_deps目录中的包"
+            Write-Host "2. 检查Python版本兼容性"
+            Write-Host "3. 以管理员身份运行PowerShell"
+        }
+        
+        Read-Host "按任意键退出"
+        EOF
+        
+        # 设置执行权限
+        chmod +x ${{ steps.platform.outputs.output_dir }}/install.sh 2>/dev/null || true
+    
+    - name: Create README
+      shell: bash
+      run: |
+        cat > ${{ steps.platform.outputs.output_dir }}/README.md << EOF
+        # Python包离线安装包
+        
+        ## 📋 环境信息
+        - **操作系统**: ${{ matrix.os }}
+        - **Python版本**: ${{ matrix.python-version }}
+        - **架构**: ${{ matrix.arch }}
+        - **平台标签**: ${{ steps.platform.outputs.platform }}
+        - **构建时间**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        - **GitHub Actions Run**: [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        
+        ## 📦 包含的包
+        \`\`\`
+        $(cat requirements_locked.txt)
+        \`\`\`
+        
+        ## 🚀 安装方法
+        
+        ### 方法1: 使用安装脚本（推荐）
+        
+        **Linux/Mac:**
+        \`\`\`bash
+        chmod +x install.sh
+        ./install.sh
+        \`\`\`
+        
+        **Windows CMD:**
+        \`\`\`cmd
+        install.bat
+        \`\`\`
+        
+        **Windows PowerShell:**
+        \`\`\`powershell
+        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+        .\install.ps1
+        \`\`\`
+        
+        ### 方法2: 手动安装
+        \`\`\`bash
+        # 安装指定的包（不包含依赖）
+        pip install --no-index --find-links . -r requirements_locked.txt
+        
+        # 或者安装包含完整依赖的版本
+        pip install --no-index --find-links ./with_deps -r requirements_locked.txt
+        \`\`\`
+        
+        ### 方法3: 安装单个包
+        \`\`\`bash
+        # 查看可用的包
+        ls *.whl
+        
+        # 安装单个包
+        pip install --no-index --find-links . 包名
+        \`\`\`
+        
+        ## ✅ 验证安装
+        \`\`\`python
+        # 验证主要包
+        import numpy as np
+        import scipy
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        
+        print("NumPy版本:", np.__version__)
+        print("SciPy版本:", scipy.__version__)
+        print("Pandas版本:", pd.__version__)
+        print("✅ 所有主要包安装成功！")
+        \`\`\`
+        
+        ## 📁 目录结构
+        \`\`\`
+        ${{ steps.platform.outputs.output_dir }}/
+        ├── *.whl                    # 特定平台的wheel包
+        ├── with_deps/               # 包含完整依赖的包
+        │   └── *.whl
+        ├── requirements_locked.txt  # 锁定版本的依赖文件
+        ├── install.sh              # Linux/Mac安装脚本
+        ├── install.bat             # Windows批处理脚本
+        ├── install.ps1             # PowerShell脚本
+        └── README.md               # 本说明文件
+        \`\`\`
+        
+        ## ⚠️ 注意事项
+        
+        ### 系统要求
+        - **Python版本**: ${{ matrix.python-version }} (推荐使用完全相同的版本)
+        - **架构**: ${{ matrix.arch }}
+        - **操作系统**: ${{ matrix.platform }}
+        
+        ### 兼容性说明
+        1. **Python版本**: 建议使用与构建时相同的Python版本 (${{ matrix.python-version }})
+        2. **系统架构**: 包已针对 ${{ matrix.arch }} 架构优化
+        3. **操作系统**: 
+           - Windows包兼容 Windows 10+ / Windows Server 2016+
+           - Linux包基于Ubuntu 22.04构建，兼容大多数现代Linux发行版
+        
+        ### 故障排除
+        
+        **问题1: 包版本冲突**
+        \`\`\`bash
+        # 解决方案：使用虚拟环境
+        python -m venv myenv
+        source myenv/bin/activate  # Linux/Mac
+        # 或
+        myenv\Scripts\activate     # Windows
+        
+        # 然后运行安装脚本
+        \`\`\`
+        
+        **问题2: 依赖缺失**
+        \`\`\`bash
+        # 解决方案：使用with_deps目录
+        pip install --no-index --find-links ./with_deps -r requirements_locked.txt
+        \`\`\`
+        
+        **问题3: 权限问题 (Linux/Mac)**
+        \`\`\`bash
+        # 解决方案：用户级安装
+        pip install --user --no-index --find-links . -r requirements_locked.txt
+        \`\`\`
+        
+        **问题4: 系统级依赖缺失**
+        
+        某些包可能需要系统级库：
+        
+        *Ubuntu/Debian:*
+        \`\`\`bash
+        sudo apt-get update
+        sudo apt-get install build-essential python3-dev
+        \`\`\`
+        
+        *CentOS/RHEL:*
+        \`\`\`bash
+        sudo yum groupinstall "Development Tools"
+        sudo yum install python3-devel
+        \`\`\`
+        
+        *Windows:*
+        - 安装 Microsoft Visual C++ Redistributable
+        - 某些包可能需要 Microsoft Visual Studio Build Tools
+        
+        ## 📞 支持
+        
+        如果遇到问题，请检查：
+        1. Python版本是否匹配
+        2. 系统架构是否正确
+        3. 是否有必要的系统级依赖
+        4. 尝试使用虚拟环境隔离安装
+        
+        构建信息：
+        - Repository: ${{ github.repository }}
+        - Commit: ${{ github.sha }}
+        - Workflow: ${{ github.workflow }}
+        
+        ---
+        *该包由 GitHub Actions 自动构建生成*
+        EOF
+        
+        # 复制requirements文件
+        cp requirements_locked.txt ${{ steps.platform.outputs.output_dir }}/
+        
+        # 如果存在原始requirements文件，也复制一份
+        if [[ -f "temp_requirements.txt" ]]; then
+          cp temp_requirements.txt ${{ steps.platform.outputs.output_dir }}/requirements_original.txt
+        fi
+    
+    - name: Verify downloaded packages
+      shell: bash
+      run: |
+        echo "======================================"
+        echo "下载验证报告"
+        echo "======================================"
+        echo "平台: ${{ matrix.platform }}-${{ matrix.arch }}"
+        echo "Python: ${{ matrix.python-version }}"
+        echo "目录: ${{ steps.platform.outputs.output_dir }}"
+        echo ""
+        
+        echo "主目录文件:"
+        ls -la ${{ steps.platform.outputs.output_dir }}/ || echo "无法列出文件"
+        echo ""
+        
+        echo "依赖目录文件:"
+        ls -la ${{ steps.platform.outputs.output_dir }}/with_deps/ || echo "依赖目录为空或不存在"
+        echo ""
+        
+        echo "统计信息:"
+        MAIN_COUNT=$(find ${{ steps.platform.outputs.output_dir }}/ -maxdepth 1 -name "*.whl" | wc -l || echo "0")
+        DEPS_COUNT=$(find ${{ steps.platform.outputs.output_dir }}/with_deps/ -name "*.whl" 2>/dev/null | wc -l || echo "0")
+        echo "主目录wheel包数量: $MAIN_COUNT"
+        echo "依赖目录wheel包数量: $DEPS_COUNT"
+        echo "总计: $((MAIN_COUNT + DEPS_COUNT))"
+        
+        echo ""
+        echo "包文件示例:"
+        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | head -5 || echo "未找到wheel文件"
+        
+        # 检查是否有任何包
+        if [[ $MAIN_COUNT -eq 0 && $DEPS_COUNT -eq 0 ]]; then
+          echo "⚠️ 警告: 未找到任何wheel包文件"
+        else
+          echo "✅ 包下载验证通过"
+        fi
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.platform.outputs.output_dir }}
+        path: ${{ steps.platform.outputs.output_dir }}/
+        retention-days: 30
+        compression-level: 6
+        if-no-files-found: warn
+    
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ steps.platform.outputs.output_dir }}/*.whl
+          ${{ steps.platform.outputs.output_dir }}/requirements_locked.txt
+          ${{ steps.platform.outputs.output_dir }}/README.md
+        name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        body: |
+          # Python包离线安装包 - ${{ github.ref_name }}
+          
+          本次发布包含以下平台的Python包：
+          
+          ## 支持的环境
+          - **Windows x86-64**: Python 3.8-3.12
+          - **Linux x86-64**: Python 3.8-3.12  
+          - **Linux ARM64**: Python 3.8-3.12
+          
+          ## 下载说明
+          请根据您的环境下载对应的artifact包，解压后按照README.md中的说明进行安装。
+          
+          构建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          提交: ${{ github.sha }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-summary:
+    needs: build-packages
+    runs-on: ubuntu-latest
+    if: always()  # 即使有job失败也运行
+    steps:
+    - name: Create build summary
+      run: |
+        echo "# 🚀 Python包构建摘要" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "本次构建为以下环境创建了离线安装包：" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 构建矩阵" >> $GITHUB_STEP_SUMMARY
+        echo "| 操作系统 | Python版本 | 架构 | 状态 |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|------------|------|------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Windows 2019 | 3.8-3.12 | x86_64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Ubuntu 22.04 | 3.8-3.12 | x86_64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Ubuntu 22.04 ARM | 3.8-3.12 | aarch64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📦 支持的平台" >> $GITHUB_STEP_SUMMARY
+        echo "- **Windows x86-64**: 完整支持Python 3.8-3.12，兼容Windows 10+/Server 2016+" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux x86-64**: 完整支持Python 3.8-3.12，基于Ubuntu 22.04构建" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux ARM64**: 完整支持Python 3.8-3.12，原生ARM64环境构建" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📥 下载方式" >> $GITHUB_STEP_SUMMARY
+        echo "所有构建产物可在Actions页面的 **Artifacts** 部分下载。" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 🔗 快速链接" >> $GITHUB_STEP_SUMMARY
+        echo "- [本次运行详情](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [工作流源码](${{ github.server_url }}/${{ github.repository }}/blob/main/.github/workflows/build-packages.yml)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📝 使用说明" >> $GITHUB_STEP_SUMMARY
+        echo "1. 下载对应平台的artifact压缩包" >> $GITHUB_STEP_SUMMARY
+        echo "2. 解压到目标机器" >> $GITHUB_STEP_SUMMARY
+        echo "3. 运行安装脚本或查看README.md获取详细说明" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "*构建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*" >> $GITHUB_STEP_SUMMARY
+
         type: boolean
         default: false
 
