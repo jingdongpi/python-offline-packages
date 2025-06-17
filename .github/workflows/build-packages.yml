@@ -65,6 +65,7 @@ jobs:
         echo "output_dir=packages-${{ matrix.os }}-py${py_version}-${{ matrix.architecture }}" >> $GITHUB_OUTPUT
     
     - name: Upgrade pip and install tools
+      shell: bash
       run: |
         python -m pip install --upgrade pip wheel setuptools
         pip install pip-tools || echo "pip-tools安装失败，将跳过版本锁定"
@@ -97,6 +98,7 @@ jobs:
         cat requirements_locked.txt
     
     - name: Download packages
+      shell: bash  # 明确指定使用bash shell
       run: |
         mkdir -p ${{ steps.platform.outputs.output_dir }}
         mkdir -p ${{ steps.platform.outputs.output_dir }}/with_deps
@@ -181,7 +183,7 @@ jobs:
         EOF
         
         # 设置执行权限
-        chmod +x ${{ steps.platform.outputs.output_dir }}/install.sh
+        chmod +x ${{ steps.platform.outputs.output_dir }}/install.sh 2>/dev/null || true
     
     - name: Create README
       shell: bash
@@ -241,12 +243,15 @@ jobs:
         cp requirements_locked.txt ${{ steps.platform.outputs.output_dir }}/
     
     - name: Verify downloaded packages
+      shell: bash
       run: |
         echo "下载的包文件:"
         ls -la ${{ steps.platform.outputs.output_dir }}/
         
         echo "包文件数量:"
-        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l
+        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l || \
+        (find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | measure-object).Count 2>/dev/null || \
+        echo "无法统计文件数量"
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
