@@ -274,6 +274,7 @@ jobs:
         # 检查Python是否可用
         if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
           echo "❌ 错误: 未找到Python解释器"
+          echo "请先安装Python: https://www.python.org/downloads/"
           exit 1
         fi
         
@@ -284,6 +285,52 @@ jobs:
         fi
         
         echo "使用Python解释器: $PYTHON_CMD"
+        
+        # 检查pip是否可用
+        echo "检查pip是否可用..."
+        if ! $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
+          echo "❌ 错误: pip未安装或不可用"
+          echo ""
+          echo "解决方案："
+          echo "1. 安装pip (推荐):"
+          echo "   # 下载get-pip.py"
+          echo "   curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py"
+          echo "   # 或者"
+          echo "   wget https://bootstrap.pypa.io/get-pip.py"
+          echo "   # 然后安装"
+          echo "   $PYTHON_CMD get-pip.py"
+          echo ""
+          echo "2. 使用系统包管理器 (Ubuntu/Debian):"
+          echo "   sudo apt-get update && sudo apt-get install python3-pip"
+          echo ""
+          echo "3. 使用系统包管理器 (CentOS/RHEL):"
+          echo "   sudo yum install python3-pip"
+          echo ""
+          echo "4. 手动安装 (本目录包含get-pip.py):"
+          if [[ -f "get-pip.py" ]]; then
+            echo "   $PYTHON_CMD get-pip.py"
+            echo ""
+            read -p "是否现在安装pip? (y/N): " install_pip
+            if [[ $install_pip == [yY] || $install_pip == [yY][eE][sS] ]]; then
+              echo "正在安装pip..."
+              $PYTHON_CMD get-pip.py
+              if [[ $? -eq 0 ]]; then
+                echo "✅ pip安装成功！"
+              else
+                echo "❌ pip安装失败"
+                exit 1
+              fi
+            else
+              echo "请先安装pip后重新运行此脚本"
+              exit 1
+            fi
+          else
+            echo "   请先下载并运行get-pip.py"
+            exit 1
+          fi
+        else
+          echo "✅ pip可用: $($PYTHON_CMD -m pip --version)"
+        fi
         
         # 检查Python版本
         PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oP '(?<=Python )\d+\.\d+' || echo "unknown")
@@ -355,12 +402,54 @@ jobs:
         if %ERRORLEVEL% NEQ 0 (
             echo ❌ 错误: 未找到Python解释器
             echo 请确保Python已安装并添加到PATH环境变量
+            echo 下载地址: https://www.python.org/downloads/windows/
             pause
             exit /b 1
         )
         
         echo 当前Python版本:
         python --version
+        
+        REM 检查pip是否可用
+        echo 检查pip是否可用...
+        python -m pip --version >nul 2>&1
+        if %ERRORLEVEL% NEQ 0 (
+            echo ❌ 错误: pip未安装或不可用
+            echo.
+            echo 解决方案:
+            echo 1. 重新安装Python并勾选 "Add pip to PATH"
+            echo 2. 手动安装pip:
+            echo    - 下载 https://bootstrap.pypa.io/get-pip.py
+            echo    - 运行: python get-pip.py
+            echo 3. 使用本目录的get-pip.py 如果可用:
+            if exist "get-pip.py" (
+                echo    - 运行: python get-pip.py
+                echo.
+                set /p install_pip="是否现在安装pip? (y/N): "
+                if /i "%install_pip%"=="y" (
+                    echo 正在安装pip...
+                    python get-pip.py
+                    if %ERRORLEVEL% EQU 0 (
+                        echo ✅ pip安装成功！
+                    ) else (
+                        echo ❌ pip安装失败
+                        pause
+                        exit /b 1
+                    )
+                ) else (
+                    echo 请先安装pip后重新运行此脚本
+                    pause
+                    exit /b 1
+                )
+            ) else (
+                echo    - 请先下载并运行get-pip.py
+                pause
+                exit /b 1
+            )
+        ) else (
+            echo ✅ pip可用
+            python -m pip --version
+        )
         
         REM 检查requirements文件
         if not exist "requirements_locked.txt" (
@@ -451,6 +540,22 @@ jobs:
         # 设置执行权限
         chmod +x ${{ steps.platform.outputs.output_dir }}/install.sh 2>/dev/null || true
     
+    - name: Download get-pip.py for offline pip installation
+      shell: bash
+      run: |
+        echo "下载 get-pip.py 以支持离线pip安装..."
+        curl -f -o ${{ steps.platform.outputs.output_dir }}/get-pip.py https://bootstrap.pypa.io/get-pip.py || {
+          echo "⚠️ 警告: 无法下载 get-pip.py，用户需要确保已安装pip"
+        }
+        
+        # 验证下载
+        if [[ -f "${{ steps.platform.outputs.output_dir }}/get-pip.py" ]]; then
+          echo "✅ get-pip.py 下载成功"
+          ls -la ${{ steps.platform.outputs.output_dir }}/get-pip.py
+        else
+          echo "❌ get-pip.py 下载失败"
+        fi
+    
     - name: Create README
       shell: bash
       run: |
@@ -540,8 +645,28 @@ jobs:
         
         ### 系统要求
         - **Python版本**: ${{ matrix.python-version }} (推荐使用完全相同的版本)
+        - **pip**: 必须安装pip包管理器
         - **架构**: ${{ matrix.arch }}
         - **操作系统**: ${{ matrix.platform }}
+        
+        ### pip安装检查
+        如果系统没有安装pip，安装脚本会自动检测并提供解决方案：
+        
+        **自动安装pip (包含get-pip.py文件时)**:
+        - Linux/Mac: 脚本会询问是否自动安装pip
+        - Windows: 批处理脚本会询问是否自动安装pip
+        
+        **手动安装pip**:
+        \`\`\`bash
+        # 方法1: 使用get-pip.py (推荐)
+        python get-pip.py
+        
+        # 方法2: 系统包管理器 (Ubuntu/Debian)
+        sudo apt-get install python3-pip
+        
+        # 方法3: 系统包管理器 (CentOS/RHEL)
+        sudo yum install python3-pip
+        \`\`\`
         
         ### 兼容性说明
         1. **Python版本**: 建议使用与构建时相同的Python版本 (${{ matrix.python-version }})
@@ -552,7 +677,22 @@ jobs:
         
         ### 故障排除
         
-        **问题1: 包版本冲突**
+        **问题1: pip未安装或不可用**
+        \`\`\`bash
+        # 解决方案1：使用get-pip.py (推荐)
+        python get-pip.py
+        
+        # 解决方案2：系统包管理器
+        # Ubuntu/Debian:
+        sudo apt-get install python3-pip
+        # CentOS/RHEL:
+        sudo yum install python3-pip
+        
+        # 解决方案3：重新安装Python (Windows)
+        # 下载Python时勾选 "Add pip to PATH"
+        \`\`\`
+        
+        **问题2: 包版本冲突**
         \`\`\`bash
         # 解决方案：使用虚拟环境
         python -m venv myenv

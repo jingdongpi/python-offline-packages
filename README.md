@@ -125,6 +125,29 @@ pip install --no-index --find-links ./packages-your-env numpy scipy pandas
 - [自定义构建](docs/custom-build.md)
 - [ARM64支持说明](docs/arm64-support.md)
 
+## 🔧 系统要求
+
+### 必要组件
+- **Python**: 3.8 - 3.12 (支持的版本)
+- **pip**: Python 包管理器 (必须)
+- **网络**: 仅构建时需要 (用户安装时无需网络)
+
+### pip 安装检查
+如果系统没有 pip，我们的安装包包含了 `get-pip.py` 文件：
+
+```bash
+# 检查 pip 是否可用
+python -m pip --version
+
+# 如果没有 pip，使用包含的文件安装
+python get-pip.py
+```
+
+**各系统安装 pip**:
+- **Ubuntu/Debian**: `sudo apt-get install python3-pip`  
+- **CentOS/RHEL**: `sudo yum install python3-pip`
+- **Windows**: 重新安装 Python 时勾选 "Add pip to PATH"
+
 ## 🤝 贡献
 
 欢迎提交Issue和Pull Request！特别欢迎：
