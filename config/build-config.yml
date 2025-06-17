@@ -1,0 +1,62 @@
+# build-config.yml
+# 构建配置文件，定义需要支持的环境
+
+environments:
+  - name: "科学计算基础"
+    packages:
+      - numpy>=1.21.0
+      - scipy>=1.7.0
+      - pandas>=1.3.0
+    python_versions: ["3.8", "3.9", "3.10", "3.11"]
+    platforms: ["windows", "linux", "macos"]
+    
+  - name: "机器学习"
+    packages:
+      - numpy>=1.21.0
+      - scipy>=1.7.0
+      - scikit-learn>=1.0.0
+      - pandas>=1.3.0
+      - matplotlib>=3.4.0
+    python_versions: ["3.9", "3.10", "3.11"]
+    platforms: ["windows", "linux", "macos"]
+    
+  - name: "深度学习"
+    packages:
+      - numpy>=1.21.0
+      - tensorflow>=2.8.0
+      - torch>=1.12.0
+      - torchvision>=0.13.0
+    python_versions: ["3.9", "3.10", "3.11"]
+    platforms: ["windows", "linux"]
+    
+  - name: "数据分析"
+    packages:
+      - numpy>=1.21.0
+      - pandas>=1.3.0
+      - matplotlib>=3.4.0
+      - seaborn>=0.11.0
+      - plotly>=5.0.0
+      - jupyter>=1.0.0
+    python_versions: ["3.8", "3.9", "3.10", "3.11"]
+    platforms: ["windows", "linux", "macos"]
+
+# 构建选项
+build_options:
+  include_dependencies: true
+  create_installation_scripts: true
+  verify_packages: true
+  compress_artifacts: true
+  
+# 平台特定配置
+platform_configs:
+  windows:
+    architectures: ["x64", "x86"]
+    additional_packages: []
+    
+  linux:
+    architectures: ["x64", "aarch64"]
+    additional_packages: []
+    
+  macos:
+    architectures: ["x64", "arm64"]
+    additional_packages: []

@@ -1,0 +1,265 @@
+# .github/workflows/build-packages.yml
+name: Build Python Packages for Multiple Environments
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      packages:
+        description: '要下载的包列表 (用空格分隔)'
+        required: false
+        default: 'numpy scipy pandas matplotlib'
+      custom_requirements:
+        description: '是否使用自定义requirements.txt'
+        type: boolean
+        default: false
+
+jobs:
+  build-packages:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        architecture: ['x64']
+        include:
+          # 添加32位Windows支持
+          - os: windows-latest
+            python-version: '3.11'
+            architecture: 'x86'
+          # 添加ARM64 macOS支持
+          - os: macos-latest
+            python-version: '3.11'
+            architecture: 'arm64'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        architecture: ${{ matrix.architecture }}
+    
+    - name: Get platform info
+      id: platform
+      shell: bash
+      run: |
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          if [[ "${{ matrix.architecture }}" == "x64" ]]; then
+            echo "platform=linux_x86_64" >> $GITHUB_OUTPUT
+          else
+            echo "platform=linux_aarch64" >> $GITHUB_OUTPUT
+          fi
+        elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          if [[ "${{ matrix.architecture }}" == "x64" ]]; then
+            echo "platform=win_amd64" >> $GITHUB_OUTPUT
+          else
+            echo "platform=win32" >> $GITHUB_OUTPUT
+          fi
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
+            echo "platform=macosx_11_0_arm64" >> $GITHUB_OUTPUT
+          else
+            echo "platform=macosx_10_9_x86_64" >> $GITHUB_OUTPUT
+          fi
+        fi
+        
+        # 设置输出目录名
+        py_version=$(echo "${{ matrix.python-version }}" | tr -d '.')
+        echo "output_dir=packages-${{ matrix.os }}-py${py_version}-${{ matrix.architecture }}" >> $GITHUB_OUTPUT
+    
+    - name: Upgrade pip and install tools
+      run: |
+        python -m pip install --upgrade pip wheel setuptools
+        pip install pip-tools
+    
+    - name: Prepare package list
+      id: packages
+      shell: bash
+      run: |
+        if [[ "${{ github.event.inputs.custom_requirements }}" == "true" && -f "requirements.txt" ]]; then
+          echo "使用项目中的requirements.txt"
+          cp requirements.txt temp_requirements.txt
+        else
+          # 使用输入的包列表或默认包
+          PACKAGES="${{ github.event.inputs.packages }}"
+          if [[ -z "$PACKAGES" ]]; then
+            PACKAGES="numpy scipy pandas matplotlib seaborn scikit-learn"
+          fi
+          echo "使用包列表: $PACKAGES"
+          echo "$PACKAGES" | tr ' ' '\n' > temp_requirements.txt
+        fi
+        
+        # 生成详细的requirements.txt（包含版本锁定）
+        pip-compile temp_requirements.txt --output-file=requirements_locked.txt
+    
+    - name: Download packages
+      run: |
+        mkdir -p ${{ steps.platform.outputs.output_dir }}
+        
+        # 下载wheel包（包含所有依赖）
+        pip download \
+          -r requirements_locked.txt \
+          --dest ${{ steps.platform.outputs.output_dir }} \
+          --platform ${{ steps.platform.outputs.platform }} \
+          --python-version ${{ matrix.python-version }} \
+          --only-binary=:all: \
+          --no-deps
+        
+        # 同时下载包含依赖的版本
+        pip download \
+          -r requirements_locked.txt \
+          --dest ${{ steps.platform.outputs.output_dir }}/with_deps
+    
+    - name: Create installation script
+      shell: bash
+      run: |
+        cat > ${{ steps.platform.outputs.output_dir }}/install.sh << 'EOF'
+        #!/bin/bash
+        # 离线安装脚本
+        
+        echo "开始离线安装Python包..."
+        echo "平台: ${{ steps.platform.outputs.platform }}"
+        echo "Python版本: ${{ matrix.python-version }}"
+        
+        # 检查Python版本
+        PYTHON_VERSION=$(python --version 2>&1 | grep -oP '(?<=Python )\d+\.\d+')
+        if [[ "$PYTHON_VERSION" != "${{ matrix.python-version }}" ]]; then
+          echo "警告: 当前Python版本($PYTHON_VERSION)与包版本(${{ matrix.python-version }})不匹配"
+          read -p "是否继续安装? (y/N): " confirm
+          if [[ $confirm != [yY] ]]; then
+            exit 1
+          fi
+        fi
+        
+        # 安装包
+        pip install --no-index --find-links . -r ../requirements_locked.txt
+        
+        echo "安装完成！"
+        EOF
+        
+        # Windows批处理脚本
+        cat > ${{ steps.platform.outputs.output_dir }}/install.bat << 'EOF'
+        @echo off
+        echo 开始离线安装Python包...
+        echo 平台: ${{ steps.platform.outputs.platform }}
+        echo Python版本: ${{ matrix.python-version }}
+        
+        pip install --no-index --find-links . -r ../requirements_locked.txt
+        
+        if %ERRORLEVEL% EQU 0 (
+            echo 安装完成！
+        ) else (
+            echo 安装失败！
+            pause
+        )
+        EOF
+        
+        # 设置执行权限
+        chmod +x ${{ steps.platform.outputs.output_dir }}/install.sh
+    
+    - name: Create README
+      shell: bash
+      run: |
+        cat > ${{ steps.platform.outputs.output_dir }}/README.md << EOF
+        # Python包离线安装包
+        
+        ## 环境信息
+        - **操作系统**: ${{ matrix.os }}
+        - **Python版本**: ${{ matrix.python-version }}
+        - **架构**: ${{ matrix.architecture }}
+        - **平台标签**: ${{ steps.platform.outputs.platform }}
+        - **构建时间**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        ## 包含的包
+        \`\`\`
+        $(cat requirements_locked.txt)
+        \`\`\`
+        
+        ## 安装方法
+        
+        ### 方法1: 使用安装脚本
+        Linux/Mac:
+        \`\`\`bash
+        chmod +x install.sh
+        ./install.sh
+        \`\`\`
+        
+        Windows:
+        \`\`\`cmd
+        install.bat
+        \`\`\`
+        
+        ### 方法2: 手动安装
+        \`\`\`bash
+        pip install --no-index --find-links . -r requirements_locked.txt
+        \`\`\`
+        
+        ### 方法3: 安装单个包
+        \`\`\`bash
+        pip install --no-index --find-links . 包名
+        \`\`\`
+        
+        ## 验证安装
+        \`\`\`python
+        import numpy, scipy, pandas, matplotlib
+        print("所有包安装成功！")
+        \`\`\`
+        
+        ## 注意事项
+        1. 请确保Python版本匹配（${{ matrix.python-version }}）
+        2. 如果出现兼容性问题，请尝试使用with_deps目录中的包
+        3. 某些包可能需要系统级依赖，请参考官方文档
+        EOF
+        
+        # 复制requirements文件
+        cp requirements_locked.txt ${{ steps.platform.outputs.output_dir }}/
+    
+    - name: Verify downloaded packages
+      run: |
+        echo "下载的包文件:"
+        ls -la ${{ steps.platform.outputs.output_dir }}/
+        
+        echo "包文件数量:"
+        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ steps.platform.outputs.output_dir }}
+        path: ${{ steps.platform.outputs.output_dir }}/
+        retention-days: 30
+    
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ steps.platform.outputs.output_dir }}/*.whl
+        name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-summary:
+    needs: build-packages
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create build summary
+      run: |
+        echo "# 构建摘要" >> $GITHUB_STEP_SUMMARY
+        echo "本次构建为以下环境创建了离线安装包：" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| 操作系统 | Python版本 | 架构 | 状态 |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|------------|------|------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Ubuntu | 3.8-3.12 | x64 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Windows | 3.8-3.12 | x64/x86 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| macOS | 3.8-3.12 | x64/ARM64 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "所有构建产物可在Actions页面的Artifacts中下载。" >> $GITHUB_STEP_SUMMARY
