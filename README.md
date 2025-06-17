@@ -7,6 +7,7 @@
 - ✅ **多环境支持**: Windows x86-64、Linux x86-64、Linux ARM64
 - ✅ **多Python版本**: 3.8、3.9、3.10、3.11、3.12
 - ✅ **精准架构支持**: 针对性优化的三个主流平台
+- ✅ **灵活构建**: 手动触发时可选择构建平台和配置
 - ✅ **自动化构建**: GitHub Actions自动构建
 - ✅ **智能安装**: 自动检测环境并选择合适的包
 - ✅ **场景预设**: 科学计算、机器学习、数据分析等
@@ -33,7 +34,33 @@ python-offline-packages/
 
 ## 🛠️ 使用方法
 
-### 对于开发者（构建离线包）
+### 🎛️ 灵活构建（推荐）
+
+现在支持手动触发构建时自由选择平台和配置：
+
+1. **访问 GitHub Actions**:
+   - 进入项目的 Actions 页面
+   - 选择 "Build Python Packages for Multiple Environments"
+   - 点击 "Run workflow"
+
+2. **配置构建选项**:
+   - **包列表**: 自定义要下载的Python包
+   - **平台选择**: 选择 Windows、Linux x64、Linux ARM64
+   - **Python版本**: 指定需要的版本 (如: `3.9,3.11`)
+   - **自定义requirements**: 可选择使用项目中的requirements.txt
+
+3. **示例配置**:
+   ```
+   ✅ 只构建 Linux ARM64
+   ❌ Windows (取消勾选)
+   ❌ Linux x64 (取消勾选) 
+   Python版本: 3.11
+   包列表: numpy scipy pandas matplotlib
+   ```
+
+📖 **详细说明**: 查看 [灵活构建指南](docs/flexible-build-guide.md)
+
+### 对于开发者（传统方式）
 
 1. **Fork这个仓库**
 2. **修改配置文件**:

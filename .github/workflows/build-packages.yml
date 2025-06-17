@@ -16,79 +16,109 @@ on:
         description: '是否使用自定义requirements.txt'
         type: boolean
         default: false
+      build_windows:
+        description: '构建 Windows 包'
+        type: boolean
+        default: true
+      build_linux_x64:
+        description: '构建 Linux x86_64 包'
+        type: boolean
+        default: true
+      build_linux_arm64:
+        description: '构建 Linux ARM64 包'
+        type: boolean
+        default: true
+      python_versions:
+        description: 'Python 版本 (用逗号分隔，如: 3.9,3.10,3.11)'
+        required: false
+        default: '3.8,3.9,3.10,3.11,3.12'
 
 jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Generate build matrix
+      id: set-matrix
+      run: |
+        # 获取输入参数（手动触发时）或设置默认值（自动触发时）
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          BUILD_WINDOWS="${{ github.event.inputs.build_windows }}"
+          BUILD_LINUX_X64="${{ github.event.inputs.build_linux_x64 }}"
+          BUILD_LINUX_ARM64="${{ github.event.inputs.build_linux_arm64 }}"
+          PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
+        else
+          # 自动触发时的默认设置
+          BUILD_WINDOWS="true"
+          BUILD_LINUX_X64="true"
+          BUILD_LINUX_ARM64="true"
+          PYTHON_VERSIONS="3.8,3.9,3.10,3.11,3.12"
+        fi
+        
+        echo "构建配置:"
+        echo "Windows: $BUILD_WINDOWS"
+        echo "Linux x64: $BUILD_LINUX_X64"
+        echo "Linux ARM64: $BUILD_LINUX_ARM64"
+        echo "Python 版本: $PYTHON_VERSIONS"
+        
+        # 生成矩阵 JSON
+        matrix_include="["
+        first=true
+        
+        # 将 Python 版本字符串转换为数组
+        IFS=',' read -ra VERSIONS <<< "$PYTHON_VERSIONS"
+        
+        # Windows 构建
+        if [[ "$BUILD_WINDOWS" == "true" ]]; then
+          for version in "${VERSIONS[@]}"; do
+            version=$(echo "$version" | xargs)  # 去除空格
+            if [[ "$first" == "false" ]]; then
+              matrix_include+=","
+            fi
+            matrix_include+="{\"os\":\"windows-2019\",\"python-version\":\"$version\",\"platform\":\"windows\",\"arch\":\"x86_64\"}"
+            first=false
+          done
+        fi
+        
+        # Linux x86_64 构建
+        if [[ "$BUILD_LINUX_X64" == "true" ]]; then
+          for version in "${VERSIONS[@]}"; do
+            version=$(echo "$version" | xargs)
+            if [[ "$first" == "false" ]]; then
+              matrix_include+=","
+            fi
+            matrix_include+="{\"os\":\"ubuntu-22.04\",\"python-version\":\"$version\",\"platform\":\"linux\",\"arch\":\"x86_64\"}"
+            first=false
+          done
+        fi
+        
+        # Linux ARM64 构建
+        if [[ "$BUILD_LINUX_ARM64" == "true" ]]; then
+          for version in "${VERSIONS[@]}"; do
+            version=$(echo "$version" | xargs)
+            if [[ "$first" == "false" ]]; then
+              matrix_include+=","
+            fi
+            matrix_include+="{\"os\":\"ubuntu-22.04-arm\",\"python-version\":\"$version\",\"platform\":\"linux\",\"arch\":\"aarch64\"}"
+            first=false
+          done
+        fi
+        
+        matrix_include+="]"
+        matrix_json="{\"include\":$matrix_include}"
+        
+        echo "生成的矩阵:"
+        echo "$matrix_json" | jq '.'
+        
+        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+
   build-packages:
+    needs: generate-matrix
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false  # 允许部分失败
-      matrix:
-        include:
-          # Windows x86-64 (使用2019提高兼容性)
-          - os: windows-2019
-            python-version: '3.8'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.9'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.10'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.11'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.12'
-            platform: windows
-            arch: x86_64
-          
-          # Linux x86-64
-          - os: ubuntu-22.04
-            python-version: '3.8'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.9'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.10'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.11'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.12'
-            platform: linux
-            arch: x86_64
-          
-          # Linux ARM64 (原生ARM64环境)
-          - os: ubuntu-22.04-arm
-            python-version: '3.8'
-            platform: linux
-            arch: aarch64
-          - os: ubuntu-22.04-arm
-            python-version: '3.9'
-            platform: linux
-            arch: aarch64
-          - os: ubuntu-22.04-arm
-            python-version: '3.10'
-            platform: linux
-            arch: aarch64
-          - os: ubuntu-22.04-arm
-            python-version: '3.11'
-            platform: linux
-            arch: aarch64
-          - os: ubuntu-22.04-arm
-            python-version: '3.12'
-            platform: linux
-            arch: aarch64
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     
     steps:
     - name: Checkout repository
@@ -673,7 +703,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   create-summary:
-    needs: build-packages
+    needs: [generate-matrix, build-packages]
     runs-on: ubuntu-latest
     if: always()  # 即使有job失败也运行
     steps:
@@ -681,13 +711,30 @@ jobs:
       run: |
         echo "# 🚀 Python包构建摘要" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "本次构建为以下环境创建了离线安装包：" >> $GITHUB_STEP_SUMMARY
+        echo "本次构建配置：" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 📊 构建矩阵" >> $GITHUB_STEP_SUMMARY
-        echo "| 操作系统 | Python版本 | 架构 | 状态 |" >> $GITHUB_STEP_SUMMARY
-        echo "|---------|------------|------|------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Windows 2019 | 3.8-3.12 | x86_64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Ubuntu 22.04 | 3.8-3.12 | x86_64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "## 🎛️ 手动构建配置" >> $GITHUB_STEP_SUMMARY
+          echo "- **Windows**: ${{ github.event.inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux x86_64**: ${{ github.event.inputs.build_linux_x64 }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux ARM64**: ${{ github.event.inputs.build_linux_arm64 }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python版本**: ${{ github.event.inputs.python_versions }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **包列表**: ${{ github.event.inputs.packages }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **自定义requirements**: ${{ github.event.inputs.custom_requirements }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## 🔄 自动构建（完整配置）" >> $GITHUB_STEP_SUMMARY
+          echo "- **Windows**: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux x86_64**: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux ARM64**: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python版本**: 3.8, 3.9, 3.10, 3.11, 3.12" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 构建状态" >> $GITHUB_STEP_SUMMARY
+        echo "| 构建状态 | 结果 |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|------|" >> $GITHUB_STEP_SUMMARY
+        echo "| 总体状态 | ${{ needs.build-packages.result == 'success' && '✅ 成功' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
         echo "| Ubuntu 22.04 ARM | 3.8-3.12 | aarch64 | ${{ needs.build-packages.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## 📦 支持的平台" >> $GITHUB_STEP_SUMMARY
