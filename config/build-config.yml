@@ -57,6 +57,6 @@ platform_configs:
     architectures: ["x64", "aarch64"]
     additional_packages: []
     
-  macos:
-    architectures: ["x64", "arm64"]
-    additional_packages: []
+  # macos:
+  #   architectures: ["x64", "arm64"]
+  #   additional_packages: []
