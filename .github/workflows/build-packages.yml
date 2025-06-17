@@ -21,8 +21,9 @@ jobs:
   build-packages:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false  # 允许部分失败
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
         architecture: ['x64']
         include:
@@ -30,17 +31,13 @@ jobs:
           - os: windows-latest
             python-version: '3.11'
             architecture: 'x86'
-          # 添加ARM64 macOS支持
-          - os: macos-latest
-            python-version: '3.11'
-            architecture: 'arm64'
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         architecture: ${{ matrix.architecture }}
@@ -60,12 +57,6 @@ jobs:
             echo "platform=win_amd64" >> $GITHUB_OUTPUT
           else
             echo "platform=win32" >> $GITHUB_OUTPUT
-          fi
-        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-          if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
-            echo "platform=macosx_11_0_arm64" >> $GITHUB_OUTPUT
-          else
-            echo "platform=macosx_10_9_x86_64" >> $GITHUB_OUTPUT
           fi
         fi
         
@@ -289,6 +280,5 @@ jobs:
         echo "|---------|------------|------|------|" >> $GITHUB_STEP_SUMMARY
         echo "| Ubuntu | 3.8-3.12 | x64 | ✅ |" >> $GITHUB_STEP_SUMMARY
         echo "| Windows | 3.8-3.12 | x64/x86 | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| macOS | 3.8-3.12 | x64/ARM64 | ✅ |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "所有构建产物可在Actions页面的Artifacts中下载。" >> $GITHUB_STEP_SUMMARY
