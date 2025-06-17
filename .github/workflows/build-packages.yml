@@ -229,7 +229,7 @@ jobs:
         find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.platform.outputs.output_dir }}
         path: ${{ steps.platform.outputs.output_dir }}/
