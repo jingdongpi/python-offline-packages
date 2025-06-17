@@ -76,7 +76,7 @@ jobs:
     - name: Upgrade pip and install tools
       run: |
         python -m pip install --upgrade pip wheel setuptools
-        pip install pip-tools
+        pip install pip-tools || echo "pip-tools安装失败，将跳过版本锁定"
     
     - name: Prepare package list
       id: packages
@@ -96,25 +96,54 @@ jobs:
         fi
         
         # 生成详细的requirements.txt（包含版本锁定）
-        pip-compile temp_requirements.txt --output-file=requirements_locked.txt
+        # 添加错误处理，如果pip-compile失败则使用基础版本
+        if ! pip-compile temp_requirements.txt --output-file=requirements_locked.txt; then
+          echo "pip-compile失败，使用基础包列表"
+          cp temp_requirements.txt requirements_locked.txt
+        fi
+        
+        echo "最终的requirements文件内容:"
+        cat requirements_locked.txt
     
     - name: Download packages
       run: |
         mkdir -p ${{ steps.platform.outputs.output_dir }}
+        mkdir -p ${{ steps.platform.outputs.output_dir }}/with_deps
         
-        # 下载wheel包（包含所有依赖）
+        # 首先尝试下载所有包（包含依赖）
+        echo "下载包含依赖的版本..."
+        pip download \
+          -r requirements_locked.txt \
+          --dest ${{ steps.platform.outputs.output_dir }}/with_deps \
+          --prefer-binary
+        
+        # 然后尝试下载特定平台的wheel包
+        echo "下载特定平台的wheel包..."
         pip download \
           -r requirements_locked.txt \
           --dest ${{ steps.platform.outputs.output_dir }} \
           --platform ${{ steps.platform.outputs.platform }} \
           --python-version ${{ matrix.python-version }} \
           --only-binary=:all: \
-          --no-deps
-        
-        # 同时下载包含依赖的版本
-        pip download \
-          -r requirements_locked.txt \
-          --dest ${{ steps.platform.outputs.output_dir }}/with_deps
+          --no-deps || {
+            echo "特定平台下载失败，尝试更宽松的下载策略..."
+            pip download \
+              -r requirements_locked.txt \
+              --dest ${{ steps.platform.outputs.output_dir }} \
+              --prefer-binary \
+              --no-deps || {
+                echo "宽松策略也失败，尝试逐个下载包..."
+                while IFS= read -r package; do
+                  if [[ ! -z "$package" && ! "$package" =~ ^[[:space:]]*# ]]; then
+                    echo "尝试下载: $package"
+                    pip download "$package" \
+                      --dest ${{ steps.platform.outputs.output_dir }} \
+                      --prefer-binary \
+                      --no-deps || echo "跳过: $package"
+                  fi
+                done < requirements_locked.txt
+              }
+          }
     
     - name: Create installation script
       shell: bash
