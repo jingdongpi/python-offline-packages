@@ -8,7 +8,7 @@ environments:
       - scipy>=1.7.0
       - pandas>=1.3.0
     python_versions: ["3.8", "3.9", "3.10", "3.11"]
-    platforms: ["windows", "linux", "macos"]
+    platforms: ["windows", "linux"]
     
   - name: "机器学习"
     packages:
@@ -18,7 +18,7 @@ environments:
       - pandas>=1.3.0
       - matplotlib>=3.4.0
     python_versions: ["3.9", "3.10", "3.11"]
-    platforms: ["windows", "linux", "macos"]
+    platforms: ["windows", "linux"]
     
   - name: "深度学习"
     packages:
@@ -38,7 +38,7 @@ environments:
       - plotly>=5.0.0
       - jupyter>=1.0.0
     python_versions: ["3.8", "3.9", "3.10", "3.11"]
-    platforms: ["windows", "linux", "macos"]
+    platforms: ["windows", "linux"]
 
 # 构建选项
 build_options:
@@ -47,16 +47,12 @@ build_options:
   verify_packages: true
   compress_artifacts: true
   
-# 平台特定配置
+# 平台特定配置 - 只保留需要的架构
 platform_configs:
   windows:
-    architectures: ["x64", "x86"]
+    architectures: ["x64"]  # 移除了x86，只保留x64
     additional_packages: []
     
   linux:
-    architectures: ["x64", "aarch64"]
+    architectures: ["x64", "aarch64"]  # 保持x64和aarch64(ARM64)
     additional_packages: []
-    
-  # macos:
-  #   architectures: ["x64", "arm64"]
-  #   additional_packages: []

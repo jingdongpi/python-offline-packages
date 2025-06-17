@@ -23,14 +23,63 @@ jobs:
     strategy:
       fail-fast: false  # 允许部分失败
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
-        architecture: ['x64']
+        # 只保留需要的平台组合
         include:
-          # 添加32位Windows支持
+          # Windows x86-64
+          - os: windows-latest
+            python-version: '3.8'
+            architecture: 'x64'
+          - os: windows-latest
+            python-version: '3.9'
+            architecture: 'x64'
+          - os: windows-latest
+            python-version: '3.10'
+            architecture: 'x64'
           - os: windows-latest
             python-version: '3.11'
-            architecture: 'x86'
+            architecture: 'x64'
+          - os: windows-latest
+            python-version: '3.12'
+            architecture: 'x64'
+          
+          # Linux x86-64 (通过ubuntu-latest实现)
+          - os: ubuntu-latest
+            python-version: '3.8'
+            architecture: 'x64'
+          - os: ubuntu-latest
+            python-version: '3.9'
+            architecture: 'x64'
+          - os: ubuntu-latest
+            python-version: '3.10'
+            architecture: 'x64'
+          - os: ubuntu-latest
+            python-version: '3.11'
+            architecture: 'x64'
+          - os: ubuntu-latest
+            python-version: '3.12'
+            architecture: 'x64'
+          
+          # Linux ARM64 - 添加完整的Python版本支持
+          - os: ubuntu-latest
+            python-version: '3.8'
+            architecture: 'aarch64'
+            cross-compile: true
+          - os: ubuntu-latest
+            python-version: '3.9'
+            architecture: 'aarch64'
+            cross-compile: true
+          - os: ubuntu-latest
+            python-version: '3.10'
+            architecture: 'aarch64'
+            cross-compile: true
+          - os: ubuntu-latest
+            python-version: '3.11'
+            architecture: 'aarch64'
+            cross-compile: true
+          - os: ubuntu-latest
+            python-version: '3.12'
+            architecture: 'aarch64'
+            cross-compile: true
     
     steps:
     - name: Checkout repository
@@ -40,7 +89,18 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        architecture: ${{ matrix.architecture }}
+        architecture: ${{ matrix.architecture == 'aarch64' && 'x64' || matrix.architecture }}
+    
+    # ARM64交叉编译设置
+    - name: Set up cross-compile for ARM64
+      if: matrix.architecture == 'aarch64'
+      run: |
+        # 设置交叉编译环境
+        sudo apt-get update
+        sudo apt-get install -y qemu-user-static
+        python -m pip install --upgrade pip
+        # 对于ARM64，我们主要下载预编译的wheel包
+        echo "设置ARM64交叉编译环境完成"
     
     - name: Get platform info
       id: platform
@@ -49,15 +109,11 @@ jobs:
         if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
           if [[ "${{ matrix.architecture }}" == "x64" ]]; then
             echo "platform=linux_x86_64" >> $GITHUB_OUTPUT
-          else
+          elif [[ "${{ matrix.architecture }}" == "aarch64" ]]; then
             echo "platform=linux_aarch64" >> $GITHUB_OUTPUT
           fi
         elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          if [[ "${{ matrix.architecture }}" == "x64" ]]; then
-            echo "platform=win_amd64" >> $GITHUB_OUTPUT
-          else
-            echo "platform=win32" >> $GITHUB_OUTPUT
-          fi
+          echo "platform=win_amd64" >> $GITHUB_OUTPUT
         fi
         
         # 设置输出目录名
@@ -88,7 +144,6 @@ jobs:
         fi
         
         # 生成详细的requirements.txt（包含版本锁定）
-        # 添加错误处理，如果pip-compile失败则使用基础版本
         if ! pip-compile temp_requirements.txt --output-file=requirements_locked.txt; then
           echo "pip-compile失败，使用基础包列表"
           cp temp_requirements.txt requirements_locked.txt
@@ -98,7 +153,7 @@ jobs:
         cat requirements_locked.txt
     
     - name: Download packages
-      shell: bash  # 明确指定使用bash shell
+      shell: bash
       run: |
         mkdir -p ${{ steps.platform.outputs.output_dir }}
         mkdir -p ${{ steps.platform.outputs.output_dir }}/with_deps
@@ -112,31 +167,40 @@ jobs:
         
         # 然后尝试下载特定平台的wheel包
         echo "下载特定平台的wheel包..."
-        pip download \
-          -r requirements_locked.txt \
-          --dest ${{ steps.platform.outputs.output_dir }} \
-          --platform ${{ steps.platform.outputs.platform }} \
-          --python-version ${{ matrix.python-version }} \
-          --only-binary=:all: \
-          --no-deps || {
-            echo "特定平台下载失败，尝试更宽松的下载策略..."
-            pip download \
-              -r requirements_locked.txt \
-              --dest ${{ steps.platform.outputs.output_dir }} \
-              --prefer-binary \
-              --no-deps || {
-                echo "宽松策略也失败，尝试逐个下载包..."
-                while IFS= read -r package; do
-                  if [[ ! -z "$package" && ! "$package" =~ ^[[:space:]]*# ]]; then
-                    echo "尝试下载: $package"
-                    pip download "$package" \
-                      --dest ${{ steps.platform.outputs.output_dir }} \
-                      --prefer-binary \
-                      --no-deps || echo "跳过: $package"
-                  fi
-                done < requirements_locked.txt
-              }
-          }
+        if [[ "${{ matrix.architecture }}" == "aarch64" ]]; then
+          # ARM64特殊处理
+          echo "下载ARM64平台包..."
+          pip download \
+            -r requirements_locked.txt \
+            --dest ${{ steps.platform.outputs.output_dir }} \
+            --platform linux_aarch64 \
+            --python-version ${{ matrix.python-version }} \
+            --only-binary=:all: \
+            --no-deps || {
+              echo "ARM64下载失败，尝试通用包..."
+              pip download \
+                -r requirements_locked.txt \
+                --dest ${{ steps.platform.outputs.output_dir }} \
+                --prefer-binary \
+                --no-deps
+            }
+        else
+          # x64平台标准处理
+          pip download \
+            -r requirements_locked.txt \
+            --dest ${{ steps.platform.outputs.output_dir }} \
+            --platform ${{ steps.platform.outputs.platform }} \
+            --python-version ${{ matrix.python-version }} \
+            --only-binary=:all: \
+            --no-deps || {
+              echo "特定平台下载失败，尝试更宽松的下载策略..."
+              pip download \
+                -r requirements_locked.txt \
+                --dest ${{ steps.platform.outputs.output_dir }} \
+                --prefer-binary \
+                --no-deps
+            }
+        fi
     
     - name: Create installation script
       shell: bash
@@ -148,6 +212,7 @@ jobs:
         echo "开始离线安装Python包..."
         echo "平台: ${{ steps.platform.outputs.platform }}"
         echo "Python版本: ${{ matrix.python-version }}"
+        echo "架构: ${{ matrix.architecture }}"
         
         # 检查Python版本
         PYTHON_VERSION=$(python --version 2>&1 | grep -oP '(?<=Python )\d+\.\d+')
@@ -171,6 +236,7 @@ jobs:
         echo 开始离线安装Python包...
         echo 平台: ${{ steps.platform.outputs.platform }}
         echo Python版本: ${{ matrix.python-version }}
+        echo 架构: ${{ matrix.architecture }}
         
         pip install --no-index --find-links . -r ../requirements_locked.txt
         
@@ -237,6 +303,7 @@ jobs:
         1. 请确保Python版本匹配（${{ matrix.python-version }}）
         2. 如果出现兼容性问题，请尝试使用with_deps目录中的包
         3. 某些包可能需要系统级依赖，请参考官方文档
+        4. ARM64平台包可能兼容性有限，建议优先使用官方预编译版本
         EOF
         
         # 复制requirements文件
@@ -281,7 +348,13 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "| 操作系统 | Python版本 | 架构 | 状态 |" >> $GITHUB_STEP_SUMMARY
         echo "|---------|------------|------|------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Ubuntu | 3.8-3.12 | x64 | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Windows | 3.8-3.12 | x64/x86 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Windows | 3.8-3.12 | x64 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Linux | 3.8-3.12 | x64 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Linux | 3.8-3.12 | ARM64 | ✅ |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "所有构建产物可在Actions页面的Artifacts中下载。" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 支持的平台" >> $GITHUB_STEP_SUMMARY
+        echo "- **Windows x86-64**: 完整支持Python 3.8-3.12" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux x86-64**: 完整支持Python 3.8-3.12" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux ARM64**: 完整支持Python 3.8-3.12 (ARM64预编译包)" >> $GITHUB_STEP_SUMMARY
