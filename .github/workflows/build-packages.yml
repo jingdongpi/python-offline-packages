@@ -249,9 +249,7 @@ jobs:
         ls -la ${{ steps.platform.outputs.output_dir }}/
         
         echo "包文件数量:"
-        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l || \
-        (find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | measure-object).Count 2>/dev/null || \
-        echo "无法统计文件数量"
+        find ${{ steps.platform.outputs.output_dir }}/ -name "*.whl" | wc -l || echo "无法统计文件数量"
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
