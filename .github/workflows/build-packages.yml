@@ -2,11 +2,12 @@
 name: Build Python Packages for Multiple Environments
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # 允许手动触发
+  # 注释掉自动触发，只保留手动触发
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+  workflow_dispatch:  # 只允许手动触发
     inputs:
       packages:
         description: '要下载的包列表 (用空格分隔)'
@@ -42,19 +43,11 @@ jobs:
     - name: Generate build matrix
       id: set-matrix
       run: |
-        # 获取输入参数（手动触发时）或设置默认值（自动触发时）
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          BUILD_WINDOWS="${{ github.event.inputs.build_windows }}"
-          BUILD_LINUX_X64="${{ github.event.inputs.build_linux_x64 }}"
-          BUILD_LINUX_ARM64="${{ github.event.inputs.build_linux_arm64 }}"
-          PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
-        else
-          # 自动触发时的默认设置
-          BUILD_WINDOWS="true"
-          BUILD_LINUX_X64="true"
-          BUILD_LINUX_ARM64="true"
-          PYTHON_VERSIONS="3.8,3.9,3.10,3.11,3.12"
-        fi
+        # 获取手动触发的输入参数
+        BUILD_WINDOWS="${{ github.event.inputs.build_windows }}"
+        BUILD_LINUX_X64="${{ github.event.inputs.build_linux_x64 }}"
+        BUILD_LINUX_ARM64="${{ github.event.inputs.build_linux_arm64 }}"
+        PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
         
         echo "构建配置:"
         echo "Windows: $BUILD_WINDOWS"
@@ -711,25 +704,13 @@ jobs:
       run: |
         echo "# 🚀 Python包构建摘要" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "本次构建配置：" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "## 🎛️ 手动构建配置" >> $GITHUB_STEP_SUMMARY
-          echo "- **Windows**: ${{ github.event.inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Linux x86_64**: ${{ github.event.inputs.build_linux_x64 }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Linux ARM64**: ${{ github.event.inputs.build_linux_arm64 }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Python版本**: ${{ github.event.inputs.python_versions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **包列表**: ${{ github.event.inputs.packages }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **自定义requirements**: ${{ github.event.inputs.custom_requirements }}" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "## 🔄 自动构建（完整配置）" >> $GITHUB_STEP_SUMMARY
-          echo "- **Windows**: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- **Linux x86_64**: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- **Linux ARM64**: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- **Python版本**: 3.8, 3.9, 3.10, 3.11, 3.12" >> $GITHUB_STEP_SUMMARY
-        fi
-        
+        echo "## 🎛️ 手动构建配置" >> $GITHUB_STEP_SUMMARY
+        echo "- **Windows**: ${{ github.event.inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux x86_64**: ${{ github.event.inputs.build_linux_x64 }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux ARM64**: ${{ github.event.inputs.build_linux_arm64 }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Python版本**: ${{ github.event.inputs.python_versions }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **包列表**: ${{ github.event.inputs.packages }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **自定义requirements**: ${{ github.event.inputs.custom_requirements }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## 📊 构建状态" >> $GITHUB_STEP_SUMMARY
         echo "| 构建状态 | 结果 |" >> $GITHUB_STEP_SUMMARY
